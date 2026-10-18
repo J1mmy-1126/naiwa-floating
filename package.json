@@ -1,0 +1,15 @@
+{
+  "name": "naiwa-floating",
+  "productName": "Naiwa 奶蛙",
+  "version": "1.0.0",
+  "description": "奶蛙 · 桌面悬浮窗 AI 助手（Electron）：自接 OpenAI 兼容 API，支持 MCP 工具、本地文件工具、模型路由与私有人设",
+  "main": "main.js",
+  "license": "MIT",
+  "author": "Naiwa Project",
+  "scripts": {
+    "start": "electron ."
+  },
+  "devDependencies": {
+    "electron": "^33.0.0"
+  }
+}

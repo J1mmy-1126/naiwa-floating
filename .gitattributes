@@ -1,0 +1,8 @@
+# 统一换行处理：文本自动，bat 强制 CRLF（cmd 解析依赖），素材二进制不转换
+* text=auto
+*.bat text eol=crlf
+*.ps1 text eol=crlf
+*.png binary
+*.gif binary
+*.webp binary
+*.jpg binary

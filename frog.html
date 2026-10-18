@@ -1,0 +1,496 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' data: blob:;">
+<title>奶蛙 · 桌面悬浮助手</title>
+<style>
+  /* ========== 设计变量：延续暗房琥珀风 + 奶蛙黄 ========== */
+  :root {
+    --ink: rgba(12, 9, 5, .96);
+    --panel-2: #1c1710;
+    --line: rgba(255, 205, 130, .13);
+    --line-strong: rgba(255, 205, 130, .38);
+    --amber: #ffb454;
+    --amber-hi: #ffd28f;
+    --amber-dim: rgba(255, 180, 84, .55);
+    --amber-faint: rgba(255, 180, 84, .14);
+    --seal: #d04a2e;
+    --frog: #ffc93c;
+    --frog-hi: #ffdf6b;
+    --text: #efe6d0;
+    --dim: #a1957b;
+    --faint: #6d6350;
+    --mono: "Cascadia Code", Consolas, monospace;
+    --sans: "Segoe UI", "Microsoft YaHei", "PingFang SC", sans-serif;
+    --ease: cubic-bezier(.22, 1, .36, 1);
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; overflow: hidden; }
+  body {
+    background: transparent;
+    font-family: var(--sans);
+    color: var(--text);
+    user-select: none;
+    cursor: default;
+  }
+  body[data-mode="ball"] #panelLayer { display: none; }
+  body[data-mode="panel"] #ballLayer { display: none; }
+
+  /* ========== 球态：悬浮奶蛙（AI 立绘 + 眼层叠加） ========== */
+  #ballLayer {
+    position: absolute; inset: 0;
+    display: grid; place-items: center;
+    -webkit-app-region: no-drag;
+  }
+  .frog-wrap { width: 210px; animation: bob 4.2s ease-in-out infinite; transition: transform .18s var(--ease); }
+  #ballLayer:hover .frog-wrap { transform: scale(1.04); }
+  body.dragging .frog-wrap { animation-play-state: paused; }
+  body.dragging #ballLayer:hover .frog-wrap { transform: none; }
+  @keyframes bob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-7px); } }
+  .frog-stage { position: relative; width: 100%; aspect-ratio: var(--ar, 4 / 3); filter: drop-shadow(0 14px 22px rgba(0, 0, 0, .35)); }
+  #ballLayer .frog-stage { width: auto; height: 288px; margin: 0 auto; }
+  .frog-stage .body-img { width: 100%; height: 100%; display: block; }
+  .frog-stage .frog-eyes { position: absolute; inset: 0; width: 100%; height: 100%; display: block; overflow: visible; }
+
+  /* 动作动画：拖动时奔跑（带原背景整窗覆盖）/ 长按时大笑（透明底，与待机蛙同尺寸） */
+  #actionGif { position: absolute; display: none; pointer-events: none; }
+  body.acting .frog-wrap { visibility: hidden; }
+  body.acting #actionGif { display: block; }
+  #actionGif[data-kind="run"] {
+    inset: 0; width: 100%; height: 100%; object-fit: cover; border-radius: 16px;
+  }
+  #actionGif[data-kind="laugh"] {
+    left: 50%; bottom: -20px; transform: translateX(-50%);
+    height: 354px;
+    filter: drop-shadow(0 14px 22px rgba(0, 0, 0, .35));
+  }
+
+  /* 眼睛跟随 / 眨眼 / 忙碌摇摆 */
+  .pupil { will-change: transform; }
+  .eyelid { transform: translateY(var(--lid, -70px)); }
+  body.blink .eyelid { animation: lidBlink .34s cubic-bezier(.4, 0, .2, 1); }
+  @keyframes lidBlink {
+    0% { transform: translateY(var(--lid, -70px)); }
+    26% { transform: translateY(0); }
+    42% { transform: translateY(0); }
+    100% { transform: translateY(var(--lid, -70px)); }
+  }
+  body.busy .frog-stage { animation: wiggle .55s ease-in-out infinite; }
+  @keyframes wiggle { 0%, 100% { transform: rotate(-2.6deg); } 50% { transform: rotate(2.6deg); } }
+
+  /* ========== 面板态 ========== */
+  #panelLayer { position: absolute; inset: 0; padding: 5px; }
+  .panel {
+    position: absolute; inset: 5px;
+    display: flex; flex-direction: column;
+    background: var(--ink);
+    border: 1px solid var(--line-strong);
+    border-radius: 18px;
+    box-shadow: 0 18px 60px rgba(0, 0, 0, .6), 0 0 40px rgba(255, 180, 84, .06);
+    overflow: hidden;
+    animation: panelIn .16s var(--ease) both;
+  }
+  @keyframes panelIn { from { opacity: 0; transform: scale(.96); } to { opacity: 1; transform: none; } }
+
+  /* 面板头部：奶蛙名牌（整条可拖拽） */
+  .panel-head {
+    display: flex; align-items: center; gap: 10px;
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--line);
+    -webkit-app-region: drag;
+    flex-shrink: 0;
+  }
+  .frog-mini { width: 54px; flex-shrink: 0; -webkit-app-region: no-drag; cursor: pointer; }
+  .frog-mini .frog-stage { filter: none; }
+  .frog-mini:hover { transform: scale(1.05); }
+  .frog-mini { transition: transform .15s var(--ease); }
+  .nameplate { display: flex; flex-direction: column; gap: 1px; -webkit-app-region: no-drag; }
+  .nameplate b { font-size: 15px; letter-spacing: 4px; color: var(--frog-hi); text-shadow: 0 0 14px rgba(255, 201, 60, .3); }
+  .nameplate span { font-family: var(--mono); font-size: 8.5px; letter-spacing: 2.5px; color: var(--faint); }
+  .head-actions { margin-left: auto; display: flex; gap: 4px; -webkit-app-region: no-drag; }
+  .icon-btn {
+    width: 28px; height: 28px; border-radius: 7px;
+    background: transparent; border: 1px solid transparent;
+    color: var(--dim); cursor: pointer;
+    display: grid; place-items: center;
+    transition: all .16s var(--ease);
+  }
+  .icon-btn:hover { color: var(--amber); border-color: var(--line); background: rgba(255, 180, 84, .06); }
+  .icon-btn.on { color: var(--amber); border-color: var(--amber-dim); background: rgba(255, 180, 84, .08); }
+  .icon-btn.speaking { color: var(--amber); border-color: var(--amber-dim); animation: breathe 1.6s ease-in-out infinite; }
+  .icon-btn.close:hover { color: var(--seal); border-color: var(--seal); }
+  @keyframes breathe { 0%, 100% { box-shadow: 0 0 3px var(--amber); } 50% { box-shadow: 0 0 10px var(--amber); } }
+
+  /* 消息区：内部细滚动条，页面本体无滚动 */
+  #chatScroll {
+    flex: 1; min-height: 0; overflow-y: auto;
+    padding: 14px 14px 8px;
+    user-select: text;
+    scrollbar-width: thin;
+  }
+  #chatScroll::-webkit-scrollbar { width: 4px; }
+  #chatScroll::-webkit-scrollbar-thumb { background: rgba(255, 205, 130, .22); border-radius: 2px; }
+  #chatScroll::-webkit-scrollbar-track { background: transparent; }
+
+  .chat-empty {
+    height: 100%; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 10px;
+    color: var(--faint); text-align: center;
+  }
+  .chat-empty .frog-hint { font-size: 13px; letter-spacing: 2px; line-height: 2; }
+
+  .msg { margin-bottom: 12px; animation: msgIn .3s var(--ease) both; }
+  @keyframes msgIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+  .msg.user { display: flex; flex-direction: column; align-items: flex-end; }
+  .bubble {
+    max-width: 92%; padding: 9px 13px; border-radius: 12px;
+    font-size: 13px; line-height: 1.75; word-break: break-word;
+  }
+  .msg.user .bubble {
+    background: linear-gradient(135deg, rgba(255, 201, 60, .16), rgba(255, 180, 84, .08));
+    border: 1px solid rgba(255, 201, 60, .3);
+    border-bottom-right-radius: 4px;
+    display: flex; gap: 9px; align-items: flex-start;
+  }
+  .msg.user .bubble .q-img {
+    width: 52px; height: 52px; object-fit: cover; border-radius: 6px;
+    border: 1px solid var(--line-strong); flex-shrink: 0;
+  }
+  .msg.ai .bubble {
+    background: var(--panel-2);
+    border: 1px solid var(--line);
+    border-bottom-left-radius: 4px;
+  }
+  .msg.ai .bubble b { color: var(--amber-hi); }
+  .msg.ai .bubble code {
+    font-family: var(--mono); font-size: 12px;
+    background: rgba(255, 180, 84, .1); border: 1px solid rgba(255, 180, 84, .14);
+    padding: 1px 5px; border-radius: 3px;
+  }
+  .thinking { display: inline-flex; align-items: center; gap: 8px; color: var(--dim); font-size: 12.5px; }
+  .thinking .dots { display: inline-flex; gap: 3px; }
+  .thinking .dots i { width: 4px; height: 4px; border-radius: 50%; background: var(--frog); animation: dblink 1.2s ease-in-out infinite; }
+  .thinking .dots i:nth-child(2) { animation-delay: .18s; }
+  .thinking .dots i:nth-child(3) { animation-delay: .36s; }
+  @keyframes dblink { 0%, 100% { opacity: .25; } 50% { opacity: 1; } }
+
+  /* 流式光标 / 消息操作 / 模式与建议 chips */
+  .stream-cursor {
+    display: inline-block; width: 7px; height: 14px; margin-left: 2px;
+    vertical-align: -2px; border-radius: 2px; background: var(--frog);
+    animation: dblink 1s ease-in-out infinite;
+  }
+  .msg-actions { display: flex; gap: 4px; margin-top: 5px; opacity: .72; }
+  .msg-actions .act {
+    font-size: 10.5px; color: var(--dim); background: transparent;
+    border: 1px solid var(--line); border-radius: 999px; padding: 2px 8px;
+    cursor: pointer; transition: all .15s var(--ease); font-family: var(--sans);
+  }
+  .msg-actions .act:hover { color: var(--amber); border-color: var(--amber-dim); background: rgba(255, 180, 84, .07); }
+  .quick-chip.on { color: var(--frog-hi); border-color: var(--amber-dim); background: rgba(255, 201, 60, .12); }
+  .suggest-row:empty { display: none; }
+
+  /* 本地操作确认卡片 */
+  .local-confirm .lc-title { font-size: 11px; letter-spacing: 1.5px; color: var(--amber-hi); margin-bottom: 4px; font-weight: 600; }
+  .local-confirm .lc-desc { font-size: 12px; word-break: break-all; white-space: pre-wrap; max-height: 130px; overflow: auto; }
+  .local-confirm .lc-btns { display: flex; gap: 6px; margin-top: 8px; }
+  .local-confirm .lc-btns .act {
+    font-size: 11px; border: 1px solid var(--line); border-radius: 999px;
+    padding: 3px 12px; background: transparent; color: var(--dim);
+    cursor: pointer; font-family: var(--sans); transition: all .15s var(--ease);
+  }
+  .local-confirm .lc-btns .act.ok { color: var(--frog-hi); border-color: var(--amber-dim); }
+  .local-confirm .lc-btns .act:hover { background: rgba(255, 180, 84, .08); }
+  .local-confirm .lc-done { font-size: 11px; color: var(--dim); }
+
+  /* 设置面板内的 API / MCP / Skill 管理区 */
+  .cap-section { margin: 14px 0 12px; padding-top: 12px; border-top: 1px dashed var(--line); }
+  .cap-section h3 { font-size: 12px; letter-spacing: 2px; color: var(--amber-hi); margin-bottom: 8px; font-weight: 600; }
+  .cap-list { display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }
+  .cap-row {
+    display: flex; align-items: center; gap: 6px;
+    border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px;
+    background: rgba(0, 0, 0, .18); font-size: 11px; color: var(--dim);
+  }
+  .cap-row b { color: var(--text); font-weight: 500; }
+  .cap-row .grow { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .cap-mini {
+    flex-shrink: 0; font-size: 10.5px; color: var(--dim); background: transparent;
+    border: 1px solid var(--line); border-radius: 6px; padding: 3px 7px; cursor: pointer;
+    transition: all .15s var(--ease); font-family: var(--sans);
+  }
+  .cap-mini:hover { color: var(--amber); border-color: var(--amber-dim); }
+  .cap-mini.danger:hover { color: var(--seal); border-color: var(--seal); }
+  .cap-row input, .cap-row textarea, .field textarea {
+    width: 100%; background: rgba(0, 0, 0, .35); border: 1px solid var(--line);
+    border-radius: 7px; color: var(--text); padding: 7px 10px; font-size: 12px;
+    outline: none; font-family: var(--sans); transition: border-color .2s ease;
+  }
+  .cap-row input:focus, .cap-row textarea:focus, .field textarea:focus { border-color: var(--amber-dim); }
+  .cap-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-bottom: 6px; }
+  .cap-grid .full { grid-column: 1 / -1; }
+
+  /* 输入区 */
+  .input-zone {
+    flex-shrink: 0; border-top: 1px solid var(--line);
+    padding: 8px 12px 12px;
+  }
+  .img-strip {
+    display: none; align-items: center; gap: 9px;
+    margin-bottom: 8px; padding: 6px 8px;
+    border: 1px dashed var(--line-strong); border-radius: 9px;
+    background: rgba(255, 180, 84, .04);
+  }
+  .img-strip.show { display: flex; }
+  .img-strip img {
+    width: 40px; height: 40px; object-fit: cover; border-radius: 6px;
+    border: 1px solid var(--line-strong);
+  }
+  .img-strip .meta {
+    flex: 1; min-width: 0; font-family: var(--mono); font-size: 10px;
+    color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .img-strip .meta b { color: var(--amber); font-weight: 500; }
+  .img-strip .rm {
+    width: 20px; height: 20px; border-radius: 50%; border: 1px solid var(--line);
+    background: transparent; color: var(--dim); cursor: pointer; font-size: 11px; line-height: 1;
+    flex-shrink: 0;
+  }
+  .img-strip .rm:hover { color: var(--seal); border-color: var(--seal); }
+
+  .quick-row { display: flex; gap: 5px; flex-wrap: wrap; margin-bottom: 7px; }
+  .quick-chip {
+    font-size: 11px; color: var(--dim); background: rgba(0, 0, 0, .2);
+    border: 1px solid var(--line); border-radius: 999px; padding: 3px 10px;
+    cursor: pointer; transition: all .15s var(--ease); font-family: var(--sans);
+  }
+  .quick-chip:hover { color: var(--amber); border-color: var(--amber-dim); background: rgba(255, 180, 84, .07); }
+
+  .input-row { display: flex; gap: 8px; align-items: flex-end; }
+  .btn-mic {
+    width: 38px; height: 38px; border-radius: 50%; cursor: pointer; flex-shrink: 0;
+    background: rgba(0, 0, 0, .3); border: 1px solid var(--line);
+    color: var(--dim); display: grid; place-items: center;
+    transition: all .2s var(--ease);
+  }
+  .btn-mic:hover { border-color: var(--amber-dim); color: var(--amber); }
+  .btn-mic.rec {
+    color: var(--seal); border-color: var(--seal); background: rgba(208, 74, 46, .1);
+    animation: recPulse 1.4s ease-in-out infinite;
+  }
+  @keyframes recPulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(208, 74, 46, .4); } 50% { box-shadow: 0 0 0 7px rgba(208, 74, 46, 0); } }
+  #questionInput {
+    flex: 1; resize: none; background: rgba(0, 0, 0, .3);
+    border: 1px solid var(--line); border-radius: 10px;
+    color: var(--text); font-family: var(--sans); font-size: 13px;
+    padding: 10px 12px; line-height: 1.55;
+    height: 40px; min-height: 40px; max-height: 110px; outline: none;
+    transition: border-color .2s ease, box-shadow .2s ease;
+  }
+  #questionInput:focus { border-color: var(--amber-dim); box-shadow: 0 0 0 3px var(--amber-faint); }
+  #questionInput::placeholder { color: var(--faint); }
+  #questionInput { scrollbar-width: none; }
+  #questionInput::-webkit-scrollbar { display: none; }
+  .btn-send {
+    width: 38px; height: 38px; border-radius: 50%; cursor: pointer; flex-shrink: 0;
+    background: var(--frog); border: none; color: #3a2a06;
+    display: grid; place-items: center;
+    box-shadow: 0 0 14px rgba(255, 201, 60, .28);
+    transition: all .2s var(--ease);
+  }
+  .btn-send:hover { background: var(--frog-hi); box-shadow: 0 0 20px rgba(255, 201, 60, .45); }
+  .btn-send:disabled { background: var(--panel-2); color: var(--faint); box-shadow: none; cursor: not-allowed; }
+
+  /* 设置弹层（窗口内） */
+  .modal-mask {
+    position: absolute; inset: 0; z-index: 50;
+    background: rgba(6, 5, 3, .82);
+    display: none; place-items: center;
+    border-radius: 18px;
+  }
+  .modal-mask.open { display: grid; }
+  .modal {
+    width: calc(100% - 36px); max-height: calc(100% - 60px); overflow-y: auto;
+    background: linear-gradient(180deg, var(--panel-2), var(--panel-2));
+    border: 1px solid var(--line-strong); border-radius: 12px; padding: 18px 20px;
+  }
+  .modal h2 { font-size: 16px; letter-spacing: 4px; margin-bottom: 6px; color: var(--frog-hi); }
+  .modal .sub { font-size: 11px; color: var(--dim); margin-bottom: 14px; line-height: 1.9; padding-bottom: 12px; border-bottom: 1px dashed var(--line); }
+  .modal .sub b { color: var(--amber-hi); }
+  .field { margin-bottom: 12px; }
+  .field label {
+    display: block; font-family: var(--mono); font-size: 10px; letter-spacing: 2px;
+    color: var(--dim); margin-bottom: 5px;
+  }
+  .field input, .field select {
+    width: 100%; background: rgba(0, 0, 0, .35); border: 1px solid var(--line);
+    border-radius: 7px; color: var(--text); padding: 8px 11px; font-size: 12.5px;
+    outline: none; font-family: var(--mono); transition: border-color .2s ease;
+  }
+  .field select { font-family: var(--sans); cursor: pointer; }
+  .field input:focus, .field select:focus { border-color: var(--amber-dim); }
+  .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+  .btn-ghost, .btn-primary {
+    padding: 7px 18px; border-radius: 7px; font-size: 12.5px; cursor: pointer;
+    transition: all .2s var(--ease); font-family: var(--sans);
+  }
+  .btn-ghost { background: transparent; border: 1px solid var(--line); color: var(--dim); }
+  .btn-ghost:hover { color: var(--text); border-color: var(--line-strong); }
+  .btn-primary { background: var(--frog); border: none; color: #3a2a06; font-weight: 600; }
+  .btn-primary:hover { background: var(--frog-hi); }
+
+  /* Toast */
+  .toast {
+    position: absolute; bottom: 14px; left: 50%; transform: translateX(-50%) translateY(10px);
+    z-index: 60; background: var(--panel-2); border: 1px solid var(--seal); border-left-width: 3px;
+    color: var(--text); font-size: 12px; padding: 9px 16px; border-radius: 7px;
+    opacity: 0; pointer-events: none; transition: all .28s var(--ease);
+    white-space: nowrap; max-width: 92%; overflow: hidden; text-overflow: ellipsis;
+  }
+  .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+</style>
+</head>
+<body data-mode="ball">
+
+<!-- 球态：奶蛙本体 -->
+<div id="ballLayer"><div class="frog-wrap" id="ballFrog"></div><img id="actionGif" alt=""></div>
+
+<!-- 面板态：对话面板 -->
+<div id="panelLayer">
+  <div class="panel">
+    <div class="panel-head">
+      <div class="frog-mini" id="miniFrog" title="点击收起"></div>
+      <div class="nameplate"><b>奶蛙</b><span>NAIWA · DESKTOP</span></div>
+      <div class="head-actions">
+        <button class="icon-btn" id="btnVoice" title="自动朗读：关">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/></svg>
+        </button>
+        <button class="icon-btn" id="btnNewChat" title="新对话（清空上下文）">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+        </button>
+        <button class="icon-btn" id="btnSettings" title="接口设置">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51a1.65 1.65 0 0 0 1.82.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+        </button>
+        <button class="icon-btn close" id="btnCollapse" title="收起为悬浮蛙">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="6 9 12 15 18 9"/></svg>
+        </button>
+      </div>
+    </div>
+
+    <div id="chatScroll">
+      <div class="chat-empty" id="chatEmpty">
+        <div class="frog-hint">呱。我是奶蛙 🐸<br>把图丢进来，或直接问我问题</div>
+      </div>
+    </div>
+
+    <div class="input-zone">
+      <div class="img-strip" id="imgStrip">
+        <img id="stripImg" alt="">
+        <div class="meta" id="stripMeta"></div>
+        <button class="rm" id="btnRemoveImg" title="移除图片">✕</button>
+      </div>
+      <div class="quick-row" id="modeRow">
+        <button class="quick-chip mode-chip on" data-mode="chat">Chat</button>
+        <button class="quick-chip mode-chip" data-mode="code">Code</button>
+        <button class="quick-chip mode-chip" data-mode="vision">Vision</button>
+      </div>
+      <div class="quick-row suggest-row" id="suggestRow"></div>
+      <div class="quick-row">
+        <button class="quick-chip" data-q="请描述这张图片的内容">描述这张图</button>
+        <button class="quick-chip" data-q="请提取图中出现的所有文字，保持原有排版逐行列出">提取文字</button>
+        <button class="quick-chip" data-q="图中有哪些物体？请列出清单并逐个简述">识别物体</button>
+      </div>
+      <div class="input-row">
+        <button class="btn-mic" id="btnMic" title="语音输入">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10v1a7 7 0 0 0 14 0v-1"/><line x1="12" y1="18" x2="12" y2="22"/></svg>
+        </button>
+        <textarea id="questionInput" placeholder="问奶蛙点什么…（Enter 发送）"></textarea>
+        <button class="btn-send" id="btnSend" title="发送">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg>
+        </button>
+      </div>
+    </div>
+
+    <!-- 设置弹层 -->
+    <div class="modal-mask" id="modalMask">
+      <div class="modal">
+        <h2>能力配置</h2>
+        <p class="sub">奶蛙不内置模型：填入你自己的 OpenAI 兼容 API 后才能对话。下方可管理 API / MCP / Skill；预设仅作模板，Key 只保存在本机。</p>
+        <div class="field">
+          <label>已保存 API</label>
+          <select id="cfgApiList"><option value="">新建 API…</option></select>
+        </div>
+        <div class="field">
+          <label>模板 Provider</label>
+          <select id="cfgProvider">
+            <option value="custom">自定义 OpenAI 兼容接口</option>
+            <option value="deepseek">DeepSeek</option>
+            <option value="zhipu">智谱 GLM</option>
+            <option value="dashscope">阿里云百炼 Qwen-VL</option>
+          </select>
+        </div>
+        <div class="field"><label>接口地址 Base URL</label><input id="cfgBaseUrl" placeholder="https://..." spellcheck="false"></div>
+        <div class="field"><label>模型名 Model</label><input id="cfgModel" placeholder="deepseek-chat / glm-4.6v-flash" spellcheck="false"></div>
+        <div class="field"><label>API Key</label><input id="cfgKey" type="password" placeholder="粘贴你的 API Key" spellcheck="false"></div>
+        <div class="cap-grid">
+          <button class="btn-ghost" id="btnApiDelete" type="button">删除当前 API</button>
+          <label style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--dim)"><input type="checkbox" id="cfgAutoTools" checked> 启用 MCP 自动工具（需模型支持 function calling）</label>
+        </div>
+
+        <div class="cap-section">
+          <h3>模型路由与私有人设</h3>
+          <div class="cap-grid">
+            <div class="field" style="margin-bottom:0"><label>Chat 模式用</label><select id="cfgRouteChat"></select></div>
+            <div class="field" style="margin-bottom:0"><label>Code 模式用</label><select id="cfgRouteCode"></select></div>
+            <div class="field" style="margin-bottom:0"><label>Vision 模式用</label><select id="cfgRouteVision"></select></div>
+            <div class="field" style="margin-bottom:0;grid-column:1/-1"><label>私有人设 system prompt（留空用默认奶蛙人设）</label><textarea id="cfgPersona" rows="3" placeholder="自定义奶蛙的性格、语气、输出格式与约束。例如：回答先给结论再给步骤；语气简洁专业，不要颜文字。" spellcheck="false"></textarea></div>
+          </div>
+        </div>
+
+        <div class="cap-section">
+          <h3>本地工具（白名单目录内的文件与命令）</h3>
+          <div class="cap-grid">
+            <label class="full" style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--dim)"><input type="checkbox" id="cfgLocalEnable"> 启用本地工具：列目录 / 读文件 / 写文件 / 执行 PowerShell</label>
+            <label class="full" style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--dim)"><input type="checkbox" id="cfgLocalAutoRead" checked> 读操作免确认（写文件与执行命令始终需确认）</label>
+            <input class="full" id="cfgLocalRoots" placeholder="白名单根目录，分号分隔，留空默认为你的用户目录（如 %USERPROFILE%;D:\projects）" spellcheck="false">
+          </div>
+        </div>
+
+        <div class="cap-section">
+          <h3>MCP 服务器（stdio，仅运行你显式添加的命令）</h3>
+          <div class="cap-list" id="mcpList"></div>
+          <div class="cap-grid">
+            <input id="mcpName" placeholder="名称，如 filesystem">
+            <input id="mcpCommand" placeholder="命令，如 npx / node / 绝对路径" spellcheck="false">
+            <input class="full" id="mcpArgs" placeholder="参数，空格分隔，如 -y @modelcontextprotocol/server-filesystem D:\\work" spellcheck="false">
+          </div>
+          <button class="btn-ghost" id="btnMcpAdd" type="button">添加 MCP</button>
+        </div>
+
+        <div class="cap-section">
+          <h3>Skill 指令包（启用后注入 system prompt）</h3>
+          <div class="cap-list" id="skillList"></div>
+          <div class="cap-grid">
+            <input class="full" id="skillName" placeholder="名称，如 代码审查 / 简历润色">
+            <textarea class="full" id="skillInstructions" rows="4" placeholder="写给奶蛙的自研指令：输出格式、约束、步骤、语气……不要粘贴任何第三方产品的私有提示词。"></textarea>
+          </div>
+          <button class="btn-ghost" id="btnSkillAdd" type="button">添加 Skill</button>
+        </div>
+
+        <div class="modal-actions">
+          <button class="btn-ghost" id="btnCancel">取消</button>
+          <button class="btn-primary" id="btnSave">保存</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="toast" id="toast"></div>
+  </div>
+</div>
+
+<input type="file" id="fileInput" accept="image/*" hidden>
+
+<script src="frog.js"></script>
+</body>
+</html>
